@@ -12,6 +12,7 @@ class UserConnectionRequest(BaseModel):
     username: str
     display_name: Optional[str] = None
     photo_url: Optional[str] = None
+    fcm_token: Optional[str] = None # Added FCM Token field
 
 class UserSearchResponse(BaseModel):
     username: str
@@ -23,9 +24,10 @@ class UserSearchResponse(BaseModel):
 def connect_to_messaging(request: UserConnectionRequest):
     """
     Enables the messaging service for a user by adding them to the messaging database.
+    Also updates the FCM token if provided.
     """
     try:
-        user_data = request.dict()
+        user_data = request.dict(exclude_unset=True)
         users_collection.update_one(
             {"email": request.email},
             {"$set": user_data},
@@ -35,6 +37,27 @@ def connect_to_messaging(request: UserConnectionRequest):
     except Exception as e:
         logger.error(f"Error connecting user: {e}")
         raise HTTPException(status_code=500, detail="Failed to connect to messaging server")
+
+@router.post("/update-fcm")
+def update_fcm_token(data: dict = Body(...)):
+    """
+    Updates the FCM token for a user.
+    """
+    email = data.get("email")
+    token = data.get("fcm_token")
+    
+    if not email or not token:
+        raise HTTPException(status_code=400, detail="Missing email or token")
+        
+    try:
+        users_collection.update_one(
+            {"email": email},
+            {"$set": {"fcm_token": token}}
+        )
+        return {"status": "Token updated"}
+    except Exception as e:
+        logger.error(f"Error updating FCM token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update token")
 
 @router.get("/search")
 def search_users(q: str = Query(..., min_length=1), current_user_email: Optional[str] = None):

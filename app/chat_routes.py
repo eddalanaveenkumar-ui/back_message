@@ -5,6 +5,21 @@ from datetime import datetime
 from .database import messages_collection, users_collection
 import logging
 import json
+from firebase_admin import messaging, initialize_app, credentials
+import os
+
+# --- Firebase Admin SDK Setup ---
+# Ensure you have the FIREBASE_CREDENTIALS environment variable set in Render
+try:
+    if not messaging.app:
+        cred_json = os.getenv("FIREBASE_CREDENTIALS")
+        if cred_json:
+            cred_dict = json.loads(cred_json)
+            cred = credentials.Certificate(cred_dict)
+            initialize_app(cred)
+except Exception as e:
+    logging.error(f"Failed to initialize Firebase Admin SDK: {e}")
+
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn")
@@ -50,6 +65,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
 async def send_message(message: Message):
     """
     Sends a message from one user to another and forwards it via WebSocket if the receiver is connected.
+    Also sends a push notification via FCM.
     """
     try:
         sender = users_collection.find_one({"email": message.sender_email})
@@ -67,8 +83,7 @@ async def send_message(message: Message):
         
         messages_collection.insert_one(msg_data)
         
-        # Forward the message via WebSocket to the receiver
-        # The message sent includes the sender's username for the client
+        # 1. Forward the message via WebSocket to the receiver if they are online
         await manager.send_personal_message(
             json.dumps({
                 "sender_username": sender["username"],
@@ -77,6 +92,25 @@ async def send_message(message: Message):
             }),
             message.receiver_username
         )
+
+        # 2. Send FCM Push Notification if the receiver has a token
+        if receiver.get("fcm_token"):
+            try:
+                fcm_message = messaging.Message(
+                    notification=messaging.Notification(
+                        title=f"New message from {sender.get('username', 'Someone')}",
+                        body="Tap to view the message" # Body is generic as content is encrypted
+                    ),
+                    token=receiver["fcm_token"],
+                    # You can add data payload to handle clicks in the app
+                    data={
+                        "type": "new_message",
+                        "sender": sender.get("username")
+                    }
+                )
+                messaging.send(fcm_message)
+            except Exception as fcm_error:
+                logger.error(f"Failed to send FCM notification: {fcm_error}")
 
         return {"status": "Message sent"}
     except Exception as e:
