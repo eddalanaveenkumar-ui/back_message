@@ -105,6 +105,45 @@ def get_user_profile(username: str, current_user_email: Optional[str] = None):
         logger.error(f"Error fetching profile: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch profile")
 
+@router.get("/mutual-connections")
+def get_mutual_connections(email: str):
+    """
+    Returns a list of users who follow the current user AND whom the current user follows.
+    """
+    try:
+        current_user = users_collection.find_one({"email": email})
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 1. Get list of people I follow
+        following_cursor = connections_collection.find({"user_id": current_user["_id"]})
+        following_usernames = [doc["follows_id"] for doc in following_cursor]
+
+        # 2. Get list of people who follow me
+        # We need to find connections where follows_id is my username
+        followers_cursor = connections_collection.find({"follows_id": current_user["username"]})
+        
+        # We need the user_ids of the followers to look up their usernames
+        follower_ids = [doc["user_id"] for doc in followers_cursor]
+        
+        # Find the user documents for these IDs
+        follower_users = list(users_collection.find({"_id": {"$in": follower_ids}}))
+        follower_usernames = [u["username"] for u in follower_users]
+
+        # 3. Find intersection (Mutuals)
+        mutual_usernames = list(set(following_usernames) & set(follower_usernames))
+        
+        # 4. Fetch full details for mutuals
+        mutual_users = list(users_collection.find(
+            {"username": {"$in": mutual_usernames}},
+            {"_id": 0, "username": 1, "display_name": 1, "photo_url": 1}
+        ))
+
+        return mutual_users
+    except Exception as e:
+        logger.error(f"Error fetching mutual connections: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch connections")
+
 @router.post("/follow")
 def follow_user(data: dict = Body(...)):
     """
