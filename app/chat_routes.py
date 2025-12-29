@@ -6,12 +6,14 @@ from .database import messages_collection, users_collection
 import logging
 import json
 from firebase_admin import messaging, initialize_app, credentials
+import firebase_admin
 import os
 
 # --- Firebase Admin SDK Setup ---
 # Ensure you have the FIREBASE_CREDENTIALS environment variable set in Render
 try:
-    if not messaging.app:
+    # Correct way to check if the app is already initialized
+    if not firebase_admin._apps:
         cred_json = os.getenv("FIREBASE_CREDENTIALS")
         if cred_json:
             cred_dict = json.loads(cred_json)
