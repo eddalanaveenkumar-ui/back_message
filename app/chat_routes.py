@@ -116,3 +116,67 @@ def get_chat_history(user1_email: str, user2_username: str, limit: int = 50):
     except Exception as e:
         logger.error(f"Error retrieving chat history: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve chat history")
+
+@router.get("/conversations")
+def get_conversations(email: str):
+    """
+    Returns a list of users the current user has chatted with, along with the last message.
+    """
+    try:
+        current_user = users_collection.find_one({"email": email})
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        current_user_id = current_user["_id"]
+
+        # Aggregation pipeline to find unique conversation partners and last message
+        pipeline = [
+            {
+                "$match": {
+                    "$or": [
+                        {"sender_id": current_user_id},
+                        {"receiver_id": current_user_id}
+                    ]
+                }
+            },
+            {
+                "$sort": {"timestamp": -1}
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "$cond": [
+                            {"$eq": ["$sender_id", current_user_id]},
+                            "$receiver_id",
+                            "$sender_id"
+                        ]
+                    },
+                    "last_message": {"$first": "$content"},
+                    "timestamp": {"$first": "$timestamp"}
+                }
+            },
+            {
+                "$sort": {"timestamp": -1}
+            }
+        ]
+
+        conversations = list(messages_collection.aggregate(pipeline))
+        
+        result = []
+        for convo in conversations:
+            partner_id = convo["_id"]
+            partner = users_collection.find_one({"_id": partner_id}, {"_id": 0, "username": 1, "photo_url": 1})
+            
+            if partner:
+                result.append({
+                    "username": partner["username"],
+                    "photo_url": partner.get("photo_url"),
+                    "last_message": convo["last_message"],
+                    "timestamp": convo["timestamp"]
+                })
+                
+        return result
+
+    except Exception as e:
+        logger.error(f"Error fetching conversations: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch conversations")
