@@ -68,6 +68,43 @@ def search_users(q: str = Query(..., min_length=1), current_user_email: Optional
         logger.error(f"Error searching users: {e}")
         raise HTTPException(status_code=500, detail="Search failed")
 
+@router.get("/profile/{username}")
+def get_user_profile(username: str, current_user_email: Optional[str] = None):
+    """
+    Gets a user's public profile with follower/following counts.
+    """
+    try:
+        user = users_collection.find_one({"username": username}, {"_id": 0})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        # Get counts
+        # Followers: connections where follows_id == username
+        followers_count = connections_collection.count_documents({"follows_id": username})
+        
+        # Following: connections where user_id == user's internal ID
+        # We need the internal ID for this query
+        user_internal = users_collection.find_one({"username": username})
+        following_count = connections_collection.count_documents({"user_id": user_internal["_id"]})
+        
+        user["followers_count"] = followers_count
+        user["following_count"] = following_count
+        
+        # Check if current user is following this profile
+        if current_user_email:
+            current_user = users_collection.find_one({"email": current_user_email})
+            if current_user:
+                is_following = connections_collection.find_one({
+                    "user_id": current_user["_id"],
+                    "follows_id": username
+                })
+                user["is_following"] = bool(is_following)
+        
+        return user
+    except Exception as e:
+        logger.error(f"Error fetching profile: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch profile")
+
 @router.post("/follow")
 def follow_user(data: dict = Body(...)):
     """
