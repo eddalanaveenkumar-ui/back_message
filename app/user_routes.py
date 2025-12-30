@@ -102,12 +102,8 @@ def get_user_profile(username: str, current_user_email: Optional[str] = None):
             raise HTTPException(status_code=404, detail="User not found")
             
         # Get counts
-        # Followers: connections where follows_id == username
-        followers_count = connections_collection.count_documents({"follows_id": username})
-        
-        # Following: connections where user_id == user's internal ID
-        # We need the internal ID for this query
         user_internal = users_collection.find_one({"username": username})
+        followers_count = connections_collection.count_documents({"follows_id": username})
         following_count = connections_collection.count_documents({"user_id": user_internal["_id"]})
         
         user["followers_count"] = followers_count
@@ -128,6 +124,36 @@ def get_user_profile(username: str, current_user_email: Optional[str] = None):
         logger.error(f"Error fetching profile: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch profile")
 
+@router.get("/profile/{username}/followers")
+def get_followers(username: str):
+    user = users_collection.find_one({"username": username})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    follower_connections = list(connections_collection.find({"follows_id": username}))
+    follower_ids = [conn["user_id"] for conn in follower_connections]
+    
+    followers = list(users_collection.find(
+        {"_id": {"$in": follower_ids}},
+        {"_id": 0, "username": 1, "display_name": 1, "photo_url": 1}
+    ))
+    return followers
+
+@router.get("/profile/{username}/following")
+def get_following(username: str):
+    user = users_collection.find_one({"username": username})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    following_connections = list(connections_collection.find({"user_id": user["_id"]}))
+    following_usernames = [conn["follows_id"] for conn in following_connections]
+
+    following = list(users_collection.find(
+        {"username": {"$in": following_usernames}},
+        {"_id": 0, "username": 1, "display_name": 1, "photo_url": 1}
+    ))
+    return following
+
 @router.get("/mutual-connections")
 def get_mutual_connections(email: str):
     """
@@ -143,13 +169,8 @@ def get_mutual_connections(email: str):
         following_usernames = [doc["follows_id"] for doc in following_cursor]
 
         # 2. Get list of people who follow me
-        # We need to find connections where follows_id is my username
         followers_cursor = connections_collection.find({"follows_id": current_user["username"]})
-        
-        # We need the user_ids of the followers to look up their usernames
         follower_ids = [doc["user_id"] for doc in followers_cursor]
-        
-        # Find the user documents for these IDs
         follower_users = list(users_collection.find({"_id": {"$in": follower_ids}}))
         follower_usernames = [u["username"] for u in follower_users]
 
