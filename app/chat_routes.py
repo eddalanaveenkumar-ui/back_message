@@ -216,3 +216,37 @@ def get_conversations(email: str):
     except Exception as e:
         logger.error(f"Error fetching conversations: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch conversations")
+
+class CallRequest(BaseModel):
+    caller: str
+    receiver: str
+    type: str
+
+@router.post("/call")
+async def initiate_call(request: CallRequest):
+    """
+    Signals a user that they are receiving a call.
+    """
+    try:
+        receiver = users_collection.find_one({"username": request.receiver})
+        if not receiver:
+            raise HTTPException(status_code=404, detail="Receiver not found")
+
+        # Send signal via WebSocket
+        await manager.send_personal_message(
+            json.dumps({
+                "type": "call_inbound",
+                "caller": request.caller,
+                "call_type": request.type,
+                "timestamp": datetime.utcnow().isoformat()
+            }),
+            request.receiver
+        )
+        
+        # Here you would typically also trigger a push notification (FCM) 
+        # specifically for calls (VoIP priority) if the user is not connected via WebSocket.
+        
+        return {"status": "Call signal sent"}
+    except Exception as e:
+        logger.error(f"Error initiating call: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initiate call")
