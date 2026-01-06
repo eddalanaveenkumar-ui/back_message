@@ -226,13 +226,14 @@ class CallRequest(BaseModel):
 async def initiate_call(request: CallRequest):
     """
     Signals a user that they are receiving a call.
+    Also sends a high-priority push notification.
     """
     try:
         receiver = users_collection.find_one({"username": request.receiver})
         if not receiver:
             raise HTTPException(status_code=404, detail="Receiver not found")
 
-        # Send signal via WebSocket
+        # 1. Send signal via WebSocket (Fastest if app is open)
         await manager.send_personal_message(
             json.dumps({
                 "type": "call_inbound",
@@ -243,8 +244,37 @@ async def initiate_call(request: CallRequest):
             request.receiver
         )
         
-        # Here you would typically also trigger a push notification (FCM) 
-        # specifically for calls (VoIP priority) if the user is not connected via WebSocket.
+        # 2. Send High Priority FCM (for background/killed state)
+        if receiver.get("fcm_token"):
+            try:
+                # Custom Emoji based on type
+                icon = "📹" if request.type == 'video' else "📞"
+                
+                fcm_message = messaging.Message(
+                    notification=messaging.Notification(
+                        title=f"{icon} Incoming {request.type} call",
+                        body=f"From {request.caller}"
+                    ),
+                    android=messaging.AndroidConfig(
+                        priority='high',
+                        notification=messaging.AndroidNotification(
+                            channel_id='triangle_calls',
+                            click_action='OPEN_APP_CALL', # Or just default
+                            sound='default',
+                            tag='call_tag'
+                        ),
+                        # Data payload is crucial for our Native Handler
+                        data={
+                            "callAction": "open",
+                            "caller": request.caller,
+                            "type": request.type
+                        }
+                    ),
+                    token=receiver["fcm_token"]
+                )
+                messaging.send(fcm_message)
+            except Exception as fcm_error:
+                logger.error(f"Failed to send FCM call notification: {fcm_error}")
         
         return {"status": "Call signal sent"}
     except Exception as e:
