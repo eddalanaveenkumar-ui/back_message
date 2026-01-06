@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, Body, Query
 from pydantic import BaseModel
 from typing import List, Optional
-from .database import users_collection, connections_collection
+from .database import users_collection, connections_collection, blocks_collection
 import logging
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn")
+
 
 class UserConnectionRequest(BaseModel):
     email: str
@@ -105,6 +106,8 @@ def search_users(q: str = Query(..., min_length=1), current_user_email: Optional
         logger.error(f"Error searching users: {e}")
         raise HTTPException(status_code=500, detail="Search failed")
 
+
+
 @router.get("/profile/{username}")
 def get_user_profile(username: str, current_user_email: Optional[str] = None):
     """
@@ -115,7 +118,7 @@ def get_user_profile(username: str, current_user_email: Optional[str] = None):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
             
-        # Get counts
+        # Get counts and internal ID
         user_internal = users_collection.find_one({"username": username})
         followers_count = connections_collection.count_documents({"follows_id": username})
         following_count = connections_collection.count_documents({"user_id": user_internal["_id"]})
@@ -123,7 +126,7 @@ def get_user_profile(username: str, current_user_email: Optional[str] = None):
         user["followers_count"] = followers_count
         user["following_count"] = following_count
         
-        # Check if current user is following this profile
+        # Check if current user is following or blocked this profile
         if current_user_email:
             current_user = users_collection.find_one({"email": current_user_email})
             if current_user:
@@ -132,11 +135,83 @@ def get_user_profile(username: str, current_user_email: Optional[str] = None):
                     "follows_id": username
                 })
                 user["is_following"] = bool(is_following)
+                
+                is_blocked = blocks_collection.find_one({
+                    "blocker_id": current_user["_id"],
+                    "blocked_id": user_internal["_id"]
+                })
+                user["is_blocked"] = bool(is_blocked)
         
         return user
     except Exception as e:
         logger.error(f"Error fetching profile: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch profile")
+
+# ... (Insert /block and /unblock at the end)
+
+@router.post("/block")
+def block_user(data: dict = Body(...)):
+    """
+    Blocks a user.
+    """
+    blocker_email = data.get("blocker_email")
+    blocked_username = data.get("blocked_username")
+    
+    if not blocker_email or not blocked_username:
+        raise HTTPException(status_code=400, detail="Missing data")
+
+    try:
+        blocker = users_collection.find_one({"email": blocker_email})
+        blocked = users_collection.find_one({"username": blocked_username})
+        
+        if not blocker or not blocked:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Add to blocks
+        blocks_collection.update_one(
+            {"blocker_id": blocker["_id"], "blocked_id": blocked["_id"]},
+            {"$set": {"timestamp": 1}},
+            upsert=True
+        )
+        
+        # Unfollow both ways
+        connections_collection.delete_many({
+            "$or": [
+                {"user_id": blocker["_id"], "follows_id": blocked_username},
+                {"user_id": blocked["_id"], "follows_id": blocker["username"]}
+            ]
+        })
+        
+        return {"status": "Blocked successfully"}
+    except Exception as e:
+        logger.error(f"Error blocking user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to block user")
+
+@router.post("/unblock")
+def unblock_user(data: dict = Body(...)):
+    """
+    Unblocks a user.
+    """
+    blocker_email = data.get("blocker_email")
+    blocked_username = data.get("blocked_username")
+    
+    if not blocker_email or not blocked_username:
+        raise HTTPException(status_code=400, detail="Missing data")
+
+    try:
+        blocker = users_collection.find_one({"email": blocker_email})
+        blocked = users_collection.find_one({"username": blocked_username})
+        
+        if not blocker or not blocked:
+             raise HTTPException(status_code=404, detail="User not found")
+             
+        blocks_collection.delete_one(
+            {"blocker_id": blocker["_id"], "blocked_id": blocked["_id"]}
+        )
+        return {"status": "Unblocked successfully"}
+    except Exception as e:
+        logger.error(f"Error unblocking user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to unblock user")
 
 @router.get("/profile/{username}/followers")
 def get_followers(username: str):

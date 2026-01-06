@@ -119,6 +119,30 @@ async def send_message(message: Message):
         logger.error(f"Error sending message: {e}")
         raise HTTPException(status_code=500, detail="Failed to send message")
 
+@router.delete("/history")
+def delete_chat_history(user1_email: str, user2_username: str):
+    """
+    Deletes the chat history between two users.
+    """
+    try:
+        user1 = users_collection.find_one({"email": user1_email})
+        user2 = users_collection.find_one({"username": user2_username})
+        
+        if not user1 or not user2:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        result = messages_collection.delete_many({
+            "$or": [
+                {"sender_id": user1["_id"], "receiver_id": user2["_id"]},
+                {"sender_id": user2["_id"], "receiver_id": user1["_id"]}
+            ]
+        })
+        
+        return {"status": "History deleted", "deleted_count": result.deleted_count}
+    except Exception as e:
+        logger.error(f"Error deleting chat history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete history")
+
 @router.get("/history")
 def get_chat_history(user1_email: str, user2_username: str, limit: int = 50):
     """

@@ -12,6 +12,7 @@ db = client[MONGO_DB_NAME]
 users_collection = db["users"]
 connections_collection = db["connections"]
 messages_collection = db["messages"]
+blocks_collection = db["blocks"]
 
 def create_indexes():
     users_collection.create_index("email", unique=True)
@@ -19,6 +20,7 @@ def create_indexes():
     connections_collection.create_index([("user_id", 1), ("follows_id", 1)], unique=True)
     messages_collection.create_index([("sender_id", 1), ("receiver_id", 1)])
     messages_collection.create_index("timestamp")
+    blocks_collection.create_index([("blocker_id", 1), ("blocked_id", 1)], unique=True)
 
 # Initialize indexes on startup
 create_indexes()
