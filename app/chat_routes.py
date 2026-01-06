@@ -250,3 +250,34 @@ async def initiate_call(request: CallRequest):
     except Exception as e:
         logger.error(f"Error initiating call: {e}")
         raise HTTPException(status_code=500, detail="Failed to initiate call")
+
+class SignalRequest(BaseModel):
+    caller: str
+    receiver: str
+    type: str # 'offer', 'answer', 'ice', 'end'
+    sdp: Optional[str] = None
+    candidate: Optional[dict] = None
+
+@router.post("/signal")
+async def send_signal(request: SignalRequest):
+    """
+    Exchanges WebRTC signaling data (SDP/ICE) between peers.
+    """
+    try:
+        # Check if receiver exists (optional but good for debugging)
+        # Forward signal via WebSocket
+        await manager.send_personal_message(
+            json.dumps({
+                "type": "webrtc_signal",
+                "sender": request.caller,
+                "signal_type": request.type,
+                "sdp": request.sdp,
+                "candidate": request.candidate,
+                "timestamp": datetime.utcnow().isoformat()
+            }),
+            request.receiver
+        )
+        return {"status": "Signal sent"}
+    except Exception as e:
+        logger.error(f"Error sending signal: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send signal")
