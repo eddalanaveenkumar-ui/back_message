@@ -59,6 +59,20 @@ def update_fcm_token(data: dict = Body(...)):
         logger.error(f"Error updating FCM token: {e}")
         raise HTTPException(status_code=500, detail="Failed to update token")
 
+@router.get("/user/details")
+def get_user_details(email: str):
+    """
+    Fetch user details by email. Useful for resolving username for WS connection.
+    """
+    try:
+        user = users_collection.find_one({"email": email}, {"_id": 0})
+        if not user:
+             raise HTTPException(status_code=404, detail="User not found")
+        return user
+    except Exception as e:
+        logger.error(f"Error fetching user details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch user details")
+
 @router.get("/search")
 def search_users(q: str = Query(..., min_length=1), current_user_email: Optional[str] = None):
     """
